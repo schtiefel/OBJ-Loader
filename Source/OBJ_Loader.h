@@ -182,17 +182,6 @@ namespace objl
 	//	a name, a vertex list, and an index list
 	struct Mesh
 	{
-		// Default Constructor
-		Mesh()
-		{
-
-		}
-		// Variable Set Constructor
-		Mesh(std::vector<Vertex>& _Vertices, std::vector<unsigned int>& _Indices)
-		{
-			Vertices = _Vertices;
-			Indices = _Indices;
-		}
 		// Mesh Name
 		std::string MeshName;
 		// Vertex List
@@ -201,6 +190,7 @@ namespace objl
 		std::vector<unsigned int> Indices;
 
 		// Material
+		std::string MaterialName;
 		Material MeshMaterial;
 	};
 
@@ -321,15 +311,16 @@ namespace objl
 		{
 			size_t token_start = in.find_first_not_of(" \t");
 			size_t space_start = in.find_first_of(" \t", token_start);
-			size_t tail_start = in.find_first_not_of(" \t", space_start);
-			size_t tail_end = in.find_last_not_of(" \t");
-			if (tail_start != std::string::npos && tail_end != std::string::npos)
+			size_t space_end = in.find_first_not_of(" \t", space_start);
+			if (space_end != std::string::npos)
 			{
-				return in.substr(tail_start, tail_end - tail_start + 1);
-			}
-			else if (tail_start != std::string::npos)
-			{
-				return in.substr(tail_start);
+				std::string ret = in.substr(space_end);
+				size_t tail_end = ret.find_last_not_of(" \t");
+				if (tail_end != std::string::npos)
+				{
+					return ret.substr(0, tail_end + 1);
+				}
+				return ret;
 			}
 			return "";
 		}
@@ -341,13 +332,16 @@ namespace objl
 			{
 				size_t token_start = in.find_first_not_of(" \t");
 				size_t token_end = in.find_first_of(" \t", token_start);
-				if (token_start != std::string::npos && token_end != std::string::npos)
+				if (token_start != std::string::npos)
 				{
-					return in.substr(token_start, token_end - token_start);
-				}
-				else if (token_start != std::string::npos)
-				{
-					return in.substr(token_start);
+					if (token_end != std::string::npos)
+					{
+						return in.substr(token_start, token_end - token_start);
+					}
+					else
+					{
+						return in.substr(token_start);
+					}
 				}
 			}
 			return "";
@@ -355,14 +349,21 @@ namespace objl
 
 		// Get element at given index position
 		template <class T>
-		inline const T & getElement(const std::vector<T> &elements, std::string &index)
+		inline const T & getElement(const std::vector<T> &elements, std::string &index, bool &indexValid)
 		{
 			int idx = std::stoi(index);
+			int size = int(elements.size());
 			if (idx < 0)
-				idx = int(elements.size()) + idx;
+				idx = size + idx;
 			else
 				idx--;
-			return elements[idx];
+			if (0 <= idx && idx < size) {
+				return elements[idx];
+			}
+			else {
+				indexValid = false;
+				return elements[0];
+			}
 		}
 	}
 
@@ -408,88 +409,56 @@ namespace objl
 			std::vector<Vector2> TCoords;
 			std::vector<Vector3> Normals;
 
-			std::vector<Vertex> Vertices;
-			std::vector<unsigned int> Indices;
-
-			std::vector<std::string> MeshMatNames;
-
-			bool listening = false;
-			std::string meshname;
-
-			Mesh tempMesh;
+			std::string currentMeshName;
+			std::string currentMaterialName;
+			LoadedMeshes.push_back(Mesh());
+			Mesh *currentMesh = &LoadedMeshes.back();
 
 			#ifdef OBJL_CONSOLE_OUTPUT
-			const unsigned int outputEveryNth = 1000;
-			unsigned int outputIndicator = outputEveryNth;
+			unsigned int outputIndicator = 1;
 			#endif
 
 			std::string curline;
 			while (std::getline(file, curline))
 			{
 				#ifdef OBJL_CONSOLE_OUTPUT
-				if ((outputIndicator = ((outputIndicator + 1) % outputEveryNth)) == 1)
+				if ((outputIndicator = ((outputIndicator + 1) % 10000)) == 1)
 				{
-					if (!meshname.empty())
+					if (!currentMeshName.empty())
 					{
 						std::cout
-							<< "\r- " << meshname
+							<< "\r- " << currentMeshName
 							<< "\t| vertices > " << Positions.size()
 							<< "\t| texcoords > " << TCoords.size()
 							<< "\t| normals > " << Normals.size()
-							<< "\t| triangles > " << (Vertices.size() / 3)
-							<< (!MeshMatNames.empty() ? "\t| material: " + MeshMatNames.back() : "");
+							<< "\t| triangles > " << (currentMesh->Vertices.size() / 3)
+							<< "\t| material: " << currentMaterialName;
 					}
 				}
 				#endif
 
 				// Generate a Mesh Object or Prepare for an object to be created
-				if (algorithm::firstToken(curline) == "o" || algorithm::firstToken(curline) == "g" || curline[0] == 'g')
+				if (algorithm::firstToken(curline) == "o" || algorithm::firstToken(curline) == "g")
 				{
-					if (!listening)
+					currentMeshName = algorithm::tail(curline);
+					if (currentMeshName.empty())
 					{
-						listening = true;
-
-						if (algorithm::firstToken(curline) == "o" || algorithm::firstToken(curline) == "g")
-						{
-							meshname = algorithm::tail(curline);
-						}
-						else
-						{
-							meshname = "unnamed";
-						}
+						currentMeshName = "unnamed";
 					}
-					else
+
+					// Create new mesh only if the current is not empty (eg. the first one)
+					if (!currentMesh->Indices.empty() || !currentMesh->Vertices.empty())
 					{
 						// Generate the mesh to put into the array
+						LoadedMeshes.push_back(Mesh());
+						currentMesh = &LoadedMeshes.back();
 
-						if (!Indices.empty() && !Vertices.empty())
-						{
-							// Create Mesh
-							tempMesh = Mesh(Vertices, Indices);
-							tempMesh.MeshName = meshname;
-
-							// Insert Mesh
-							LoadedMeshes.push_back(tempMesh);
-
-							// Cleanup
-							Vertices.clear();
-							Indices.clear();
-							meshname.clear();
-
-							meshname = algorithm::tail(curline);
-						}
-						else
-						{
-							if (algorithm::firstToken(curline) == "o" || algorithm::firstToken(curline) == "g")
-							{
-								meshname = algorithm::tail(curline);
-							}
-							else
-							{
-								meshname = "unnamed";
-							}
-						}
+						// Set Material to latest seen material
+						currentMesh->MaterialName = currentMaterialName;
 					}
+
+					currentMesh->MeshName = currentMeshName;
+
 					#ifdef OBJL_CONSOLE_OUTPUT
 					std::cout << std::endl;
 					outputIndicator = 0;
@@ -543,7 +512,7 @@ namespace objl
 					// Add Vertices
 					for (int i = 0; i < int(vVerts.size()); i++)
 					{
-						Vertices.push_back(vVerts[i]);
+						currentMesh->Vertices.push_back(vVerts[i]);
 
 						LoadedVertices.push_back(vVerts[i]);
 					}
@@ -555,8 +524,8 @@ namespace objl
 					// Add Indices
 					for (int i = 0; i < int(iIndices.size()); i++)
 					{
-						unsigned int indnum = (unsigned int)((Vertices.size()) - vVerts.size()) + iIndices[i];
-						Indices.push_back(indnum);
+						unsigned int indnum = (unsigned int)((currentMesh->Vertices.size()) - vVerts.size()) + iIndices[i];
+						currentMesh->Indices.push_back(indnum);
 
 						indnum = (unsigned int)((LoadedVertices.size()) - vVerts.size()) + iIndices[i];
 						LoadedIndices.push_back(indnum);
@@ -566,17 +535,22 @@ namespace objl
 				// Get Mesh Material Name
 				if (algorithm::firstToken(curline) == "usemtl")
 				{
-					MeshMatNames.push_back(algorithm::tail(curline));
+					currentMaterialName = algorithm::tail(curline);
+
+					// Assign Material to Mesh, created reight before
+					if (currentMesh->Indices.empty() || currentMesh->Vertices.empty())
+					{
+						currentMesh->MaterialName = currentMaterialName;
+					}
 
 					// Create new Mesh, if Material changes within a group
-					if (!Indices.empty() && !Vertices.empty())
+					else
 					{
-						// Create Mesh
-						tempMesh = Mesh(Vertices, Indices);
-						tempMesh.MeshName = meshname;
+						// Create new Mesh
+						Mesh tempMesh;
 						int i = 2;
 						while(1) {
-							tempMesh.MeshName = meshname + "_" + std::to_string(i);
+							tempMesh.MeshName = currentMeshName + "_" + std::to_string(i);
 
 							for (auto &m : LoadedMeshes)
 								if (m.MeshName == tempMesh.MeshName)
@@ -584,12 +558,12 @@ namespace objl
 							break;
 						}
 
+						// Set Material to latest seen material
+						tempMesh.MaterialName = currentMaterialName;
+
 						// Insert Mesh
 						LoadedMeshes.push_back(tempMesh);
-
-						// Cleanup
-						Vertices.clear();
-						Indices.clear();
+						currentMesh = &LoadedMeshes.back();
 					}
 
 					#ifdef OBJL_CONSOLE_OUTPUT
@@ -631,32 +605,20 @@ namespace objl
 			std::cout << std::endl;
 			#endif
 
-			// Deal with last mesh
-
-			if (!Indices.empty() && !Vertices.empty())
-			{
-				// Create Mesh
-				tempMesh = Mesh(Vertices, Indices);
-				tempMesh.MeshName = meshname;
-
-				// Insert Mesh
-				LoadedMeshes.push_back(tempMesh);
-			}
-
 			file.close();
 
 			// Set Materials for each Mesh
-			for (int i = 0; i < MeshMatNames.size(); i++)
+			for (int i = 0; i < LoadedMeshes.size(); i++)
 			{
-				std::string matname = MeshMatNames[i];
+				Mesh &mesh = LoadedMeshes[i];
 
 				// Find corresponding material name in loaded materials
 				// when found copy material variables into mesh material
 				for (int j = 0; j < LoadedMaterials.size(); j++)
 				{
-					if (LoadedMaterials[j].name == matname)
+					if (LoadedMaterials[j].name == mesh.MaterialName)
 					{
-						LoadedMeshes[i].MeshMaterial = LoadedMaterials[j];
+						mesh.MeshMaterial = LoadedMaterials[j];
 						break;
 					}
 				}
@@ -735,38 +697,47 @@ namespace objl
 				}
 
 				// Calculate and store the vertex
+				bool valid = true;
 				switch (vtype)
 				{
 				case 1: // P
 				{
-					vVert.Position = algorithm::getElement(iPositions, svert[0]);
+					vVert.Position = algorithm::getElement(iPositions, svert[0], valid);
 					vVert.TextureCoordinate = Vector2(0, 0);
-					noNormal = true;
-					oVerts.push_back(vVert);
+					if (valid) {
+						noNormal = true;
+						oVerts.push_back(vVert);
+					}
 					break;
 				}
 				case 2: // P/T
 				{
-					vVert.Position = algorithm::getElement(iPositions, svert[0]);
-					vVert.TextureCoordinate = algorithm::getElement(iTCoords, svert[1]);
-					noNormal = true;
-					oVerts.push_back(vVert);
+					vVert.Position = algorithm::getElement(iPositions, svert[0], valid);
+					vVert.TextureCoordinate = algorithm::getElement(iTCoords, svert[1], valid);
+					if (valid) {
+						noNormal = true;
+						oVerts.push_back(vVert);
+					}
 					break;
 				}
 				case 3: // P//N
 				{
-					vVert.Position = algorithm::getElement(iPositions, svert[0]);
+					vVert.Position = algorithm::getElement(iPositions, svert[0], valid);
 					vVert.TextureCoordinate = Vector2(0, 0);
-					vVert.Normal = algorithm::getElement(iNormals, svert[2]);
-					oVerts.push_back(vVert);
+					vVert.Normal = algorithm::getElement(iNormals, svert[2], valid);
+					if (valid) {
+						oVerts.push_back(vVert);
+					}
 					break;
 				}
 				case 4: // P/T/N
 				{
-					vVert.Position = algorithm::getElement(iPositions, svert[0]);
-					vVert.TextureCoordinate = algorithm::getElement(iTCoords, svert[1]);
-					vVert.Normal = algorithm::getElement(iNormals, svert[2]);
-					oVerts.push_back(vVert);
+					vVert.Position = algorithm::getElement(iPositions, svert[0], valid);
+					vVert.TextureCoordinate = algorithm::getElement(iTCoords, svert[1], valid);
+					vVert.Normal = algorithm::getElement(iNormals, svert[2], valid);
+					if (valid) {
+						oVerts.push_back(vVert);
+					}
 					break;
 				}
 				default:
